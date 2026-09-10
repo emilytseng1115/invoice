@@ -1,6 +1,10 @@
 from __future__ import annotations
 
 import hashlib
+import logging
+from logging.handlers import RotatingFileHandler
+from pathlib import Path
+from uuid import uuid4
 
 import streamlit as st
 
@@ -18,6 +22,33 @@ from pdf_editor import edit_pdf, find_matches
 from sql_api import EcsItemLookup, SqlApiError, query_description, query_ecs_item
 
 
+LOG_DIR = Path(__file__).resolve().parent / "logs"
+LOG_DIR.mkdir(exist_ok=True)
+APP_LOG = LOG_DIR / "app.log"
+logger = logging.getLogger("pdf_field_editor")
+if not logger.handlers:
+    logger.setLevel(logging.INFO)
+    handler = RotatingFileHandler(APP_LOG, maxBytes=2_000_000, backupCount=5, encoding="utf-8")
+    handler.setFormatter(logging.Formatter("%(asctime)s | %(levelname)s | %(message)s"))
+    logger.addHandler(handler)
+
+
+def report_error(title: str, exc: Exception, *, context: str = "") -> None:
+    """Show a useful error to the user and retain the full traceback locally."""
+    error_id = uuid4().hex[:8].upper()
+    logger.exception("error_id=%s context=%s error=%s", error_id, context, exc)
+    st.error(f"{title}（錯誤編號：{error_id}）")
+    with st.expander("查看錯誤詳情與處理建議"):
+        st.code(f"{type(exc).__name__}: {exc}", language="text")
+        st.caption(f"完整例外已寫入：{APP_LOG}")
+        st.markdown("請先確認檔案未損壞、未加密且格式正確；若仍失敗，請提供錯誤編號與 app.log。")
+
+
+def log_event(message: str, **details: object) -> None:
+    suffix = " ".join(f"{key}={value!r}" for key, value in details.items())
+    logger.info("%s%s", message, f" | {suffix}" if suffix else "")
+
+
 st.set_page_config(page_title="PDF／Word 發票處理工具", page_icon="✎", layout="wide")
 
 st.markdown(
@@ -28,6 +59,15 @@ st.markdown(
     [data-testid="stFileUploader"] { background: white; border-radius: 16px; padding: 12px; }
     div[data-testid="stMetric"] { background: white; border: 1px solid #e7e9f0; padding: 14px; border-radius: 14px; }
     [data-testid="stDataFrame"] { background: white; border-radius: 14px; overflow: hidden; }
+    .app-hero { padding: 22px 26px; border-radius: 20px; color: white;
+      background: linear-gradient(120deg, #183153, #2563eb 58%, #06b6d4);
+      box-shadow: 0 14px 34px rgba(37,99,235,.18); margin-bottom: 18px; }
+    .app-hero h1 { margin: 0 0 6px; font-size: 1.75rem; }
+    .app-hero p { margin: 0; opacity: .9; }
+    .status-ready { display:inline-flex; align-items:center; gap:8px; padding:7px 12px;
+      border-radius:999px; background:#dcfce7; color:#166534; font-weight:700; font-size:.86rem; }
+    .status-ready:before { content:''; width:8px; height:8px; border-radius:50%; background:#22c55e;
+      box-shadow:0 0 0 4px rgba(34,197,94,.15); }
     </style>
     """,
     unsafe_allow_html=True,
@@ -38,10 +78,17 @@ def render_invoice_data(file_bytes: bytes, is_pdf: bool) -> None:
     st.subheader("發票內容")
     st.caption("Invoice No、Customer PN 與每一筆 Item 顯示在同一列，並標示資料來源。")
 
-    ocr_config = load_ocr_config()
-    image_pages = detect_image_pages(file_bytes) if is_pdf else []
-    word_images = extract_docx_images(file_bytes) if not is_pdf else []
-    word_rows = extract_docx_invoice_rows(file_bytes) if not is_pdf else []
+    try:
+        with st.status("正在分析文件結構…", expanded=True) as status:
+            status.write("檢查文字層、表格與影像內容")
+            ocr_config = load_ocr_config()
+            image_pages = detect_image_pages(file_bytes) if is_pdf else []
+            word_images = extract_docx_images(file_bytes) if not is_pdf else []
+            word_rows = extract_docx_invoice_rows(file_bytes) if not is_pdf else []
+            status.update(label="文件結構分析完成", state="complete", expanded=False)
+    except Exception as exc:
+        report_error("無法分析文件結構", exc, context="document preflight")
+        return
     needs_word_ocr = bool(word_images) and not word_rows
     ocr_api_key = ""
     if image_pages or needs_word_ocr:
@@ -81,7 +128,7 @@ def render_invoice_data(file_bytes: bytes, is_pdf: bool) -> None:
             rows.extend(st.session_state.get("word_ocr_rows", []))
         rows.sort(key=lambda row: row.page_number)
     except Exception as exc:
-        st.error(f"無法讀取發票內容：{exc}")
+        report_error("無法讀取發票內容", exc, context=f"invoice extraction is_pdf={is_pdf}")
         return
 
     if not rows:
@@ -103,15 +150,16 @@ def render_invoice_data(file_bytes: bytes, is_pdf: bool) -> None:
         customer_items = list(dict.fromkeys(row.item for row in rows))
         missing_items = [item for item in customer_items if item not in ecs_lookups]
         if missing_items:
-            progress = st.progress(0, text="正在查詢 ECS Item／Description...")
+            progress = st.progress(0, text=f"準備查詢 0/{len(missing_items)} 筆 ECS 資料")
             updated = dict(ecs_lookups)
             for index, customer_item in enumerate(missing_items, start=1):
                 try:
                     updated[customer_item] = query_ecs_item(customer_item)
                 except SqlApiError as exc:
                     updated[customer_item] = EcsItemLookup("查詢失敗", "查詢失敗", "error")
+                    logger.warning("ECS lookup failed item=%r error=%s", customer_item, exc)
                     st.warning(f"Cust Item {customer_item}：{exc}")
-                progress.progress(index / len(missing_items), text=f"正在查詢 {customer_item}")
+                progress.progress(index / len(missing_items), text=f"查詢進度 {index}/{len(missing_items)}：{customer_item}")
             progress.empty()
             ecs_lookups = updated
             st.session_state[ecs_cache_key] = ecs_lookups
@@ -129,6 +177,7 @@ def render_invoice_data(file_bytes: bytes, is_pdf: bool) -> None:
                         updated[item_value] = query_description(item_value)
                     except SqlApiError as exc:
                         updated[item_value] = "查詢失敗"
+                        logger.warning("Description lookup failed item=%r error=%s", item_value, exc)
                         st.warning(f"Item {item_value}：{exc}")
                 progress.progress(index / len(item_values), text=f"正在查詢 {item_value}")
             progress.empty()
@@ -195,7 +244,11 @@ def render_pdf_editor(pdf_bytes: bytes, uploaded_name: str) -> None:
 
     with right:
         st.subheader("2. 選擇欄位位置")
-        matches = find_matches(pdf_bytes, anchor_text) if anchor_text.strip() else []
+        try:
+            matches = find_matches(pdf_bytes, anchor_text) if anchor_text.strip() else []
+        except Exception as exc:
+            report_error("搜尋 PDF 欄位時發生錯誤", exc, context="find PDF matches")
+            matches = []
         if matches:
             scope = st.radio(
                 "修改範圍",
@@ -237,14 +290,19 @@ def render_pdf_editor(pdf_bytes: bytes, uploaded_name: str) -> None:
     st.divider()
     if st.button("產生修改後的 PDF", type="primary", use_container_width=True, disabled=selected is None):
         try:
-            targets = matches if scope == "修改全部符合欄位" else selected
-            result = edit_pdf(
-                pdf_bytes, targets, new_text.strip(), mode=mode,
-                replace_text=replace_text, x_offset=x_offset, y_offset=y_offset,
-                font_size=font_size, cover_width=cover_width,
-            )
+            with st.status("正在產生 PDF…", expanded=True) as status:
+                status.write("驗證修改範圍與輸入內容")
+                targets = matches if scope == "修改全部符合欄位" else selected
+                status.write("套用文字與版面設定")
+                result = edit_pdf(
+                    pdf_bytes, targets, new_text.strip(), mode=mode,
+                    replace_text=replace_text, x_offset=x_offset, y_offset=y_offset,
+                    font_size=font_size, cover_width=cover_width,
+                )
+                status.write("完成輸出檔案驗證")
+                status.update(label="PDF 產生完成", state="complete", expanded=False)
         except Exception as exc:
-            st.error(f"無法完成修改：{exc}")
+            report_error("無法完成 PDF 修改", exc, context=f"edit PDF mode={mode}")
         else:
             st.session_state["edited_pdf"] = result
             st.session_state["output_name"] = uploaded_name.rsplit(".", 1)[0] + "_edited.pdf"
@@ -283,7 +341,11 @@ def render_word_editor(docx_bytes: bytes, uploaded_name: str) -> None:
 
     with right:
         st.subheader("2. 選擇欄位位置")
-        matches = find_word_matches(docx_bytes, anchor_text) if anchor_text.strip() else []
+        try:
+            matches = find_word_matches(docx_bytes, anchor_text) if anchor_text.strip() else []
+        except Exception as exc:
+            report_error("搜尋 Word 欄位時發生錯誤", exc, context="find Word matches")
+            matches = []
         if matches:
             scope = st.radio(
                 "修改範圍", ["只修改選取的一筆", "修改全部符合欄位"],
@@ -309,12 +371,16 @@ def render_word_editor(docx_bytes: bytes, uploaded_name: str) -> None:
         disabled=selected is None, key="generate_word",
     ):
         try:
-            targets = matches if scope == "修改全部符合欄位" else [selected]
-            result = edit_docx(
-                docx_bytes, targets, new_text, mode=mode, replace_text=replace_text
-            )
+            with st.status("正在產生 Word…", expanded=True) as status:
+                status.write("驗證修改範圍與輸入內容")
+                targets = matches if scope == "修改全部符合欄位" else [selected]
+                status.write("套用文字修改並重新封裝文件")
+                result = edit_docx(
+                    docx_bytes, targets, new_text, mode=mode, replace_text=replace_text
+                )
+                status.update(label="Word 產生完成", state="complete", expanded=False)
         except Exception as exc:
-            st.error(f"無法完成修改：{exc}")
+            report_error("無法完成 Word 修改", exc, context=f"edit Word mode={mode}")
         else:
             st.session_state["edited_docx"] = result
             st.session_state["word_output_name"] = uploaded_name.rsplit(".", 1)[0] + "_edited.docx"
@@ -329,17 +395,41 @@ def render_word_editor(docx_bytes: bytes, uploaded_name: str) -> None:
         )
 
 
-st.title("PDF／Word 發票處理工具")
-st.caption("上傳 PDF 或 Word，顯示發票內容，並可修改指定欄位。")
+st.markdown(
+    """<div class="app-hero"><h1>PDF／Word 發票處理工具</h1>
+    <p>擷取發票資料、查詢 ECS 資訊並安全修改指定欄位</p></div>""",
+    unsafe_allow_html=True,
+)
+
+with st.sidebar:
+    st.subheader("系統狀態")
+    st.markdown('<span class="status-ready">服務運作中</span>', unsafe_allow_html=True)
+    st.caption("處理全程在此平台進行，原始檔不會被覆寫。")
+    st.divider()
+    st.markdown("**處理流程**")
+    st.markdown("1. 上傳文件\n2. 分析與擷取\n3. 查詢／修改\n4. 下載結果")
+    with st.expander("診斷資訊"):
+        st.caption(f"應用程式日誌：{APP_LOG}")
+        st.caption("如遇錯誤，請記下畫面上的錯誤編號。")
 
 uploaded = st.file_uploader("上傳 PDF 或 Word", type=["pdf", "docx"])
 if uploaded is None:
     st.info("請先選擇一份 PDF 或 Word。原始檔不會被覆寫。")
     st.stop()
 
-st.success(f"目前上傳的測試檔案：{uploaded.name}")
+st.success(f"已載入檔案：{uploaded.name}")
 file_bytes = uploaded.getvalue()
 is_pdf = uploaded.name.lower().endswith(".pdf")
+log_event("file uploaded", name=uploaded.name, size=len(file_bytes), kind="pdf" if is_pdf else "docx")
+
+if not file_bytes:
+    st.error("上傳的檔案是空白檔案，請重新選擇。")
+    st.stop()
+
+meta1, meta2, meta3 = st.columns(3)
+meta1.metric("檔案格式", "PDF" if is_pdf else "Word")
+meta2.metric("檔案大小", f"{len(file_bytes) / 1024:,.1f} KB")
+meta3.metric("目前階段", "已就緒")
 
 if is_pdf:
     data_tab, edit_tab = st.tabs(["發票內容擷取", "PDF 欄位修改"])
