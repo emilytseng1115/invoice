@@ -1,0 +1,8 @@
+{
+  "ApiUrl": "https://ds.ecs.com.tw/ollama/v1/chat/completions",
+  "DefaultModel": "gemma4:26b",
+  "OCRModel": "glm-ocr:latest",
+  "Timeout": 300,
+  "MaxRetries": 5,
+  "ApiKeyEnvironmentVariable": "OCR_API_KEY"
+}

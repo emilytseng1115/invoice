@@ -1,0 +1,101 @@
+# Byte-compiled / optimized / DLL files
+**/__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.pyre/
+.hypothesis/
+.tox/
+.nox/
+.coverage
+.coverage.*
+htmlcov/
+coverage.xml
+
+# C extensions
+*.so
+
+# Distribution / packaging / builds
+dist/
+build/
+bin/
+*.egg-info/
+.eggs/
+pip-wheel-metadata/
+deployment/dist/
+deployment/installer_staging/payload.zip
+deployment/extract_test_20260902/
+deployment/payload_source/runtime/
+
+# Logs
+*.log
+**/*.log
+deployment/portable_test.log
+deployment/portable_test_error.log
+pdf_field_editor/launcher.log
+pdf_field_editor/streamlit_runtime.error.log
+pdf_field_editor/streamlit_runtime.out.log
+
+# User secrets & credentials
+.env
+.env.local
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+pdf_field_editor/ocr_api_key.txt
+**/ocr_api_key.txt
+
+# Virtual environments
+.venv/
+venv/
+ENV/
+env/
+
+# Project temporary, artifact, and output folders
+tmp/
+output/
+.codex-finalizer/
+.ppt_build/
+node_modules/
+.cache/
+.tmp/
+*.tmp
+*.temp
+*.bak
+*.orig
+*.sqlite
+*.sqlite3
+*.db
+
+# IDEs / Editors
+.vscode/
+.idea/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.swp
+*~
+.history/
+
+# Operating System files
+.DS_Store
+Thumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+
+# Microsoft Office temporary files
+~$*.docx
+~$*.xlsx
+~$*.pptx
+
+# Generated documents and release archives
+*.pdf
+*.docx
+*.pptx
+*.zip

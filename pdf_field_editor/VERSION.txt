@@ -1,0 +1,10 @@
+版本：2026.09.10
+平台：Windows 64-bit
+建議 Python：3.13 64-bit
+
+本版本包含：
+- PDF／Word 發票內容擷取
+- PDF／Word 欄位修改
+- 影像型文件 OCR
+- PDF Cust Item 自動查詢 ECS Item／ECS Description
+- 一鍵建立虛擬環境、安裝套件並啟動平台
