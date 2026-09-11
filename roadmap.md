@@ -17,8 +17,8 @@
 - [x] 支援多行及非 WIFI 開頭的 Description
 - [x] 支援不同 Word 欄位名稱，例如 `INV NO.`、`INV-QTY`、`PRICE`
 - [x] PDF Item 若以 `(INTEL)` 結尾，顯示時自動移除該字樣
-- [x] PDF 欄位名稱調整為 Cust Item 與 Cust Description
-- [x] Cust Item 可透過內部 Oracle SQL API 查詢 ECS Item 與 ECS Description
+- [x] PDF 欄位名稱調整為 Vendor Item 與 Vendor Description
+- [x] Vendor Item 可透過內部 Oracle SQL API 查詢 ECS Item 與 ECS Description
 - [x] PDF 上傳完成後自動查詢 ECS Item 與 ECS Description，不需另外按按鈕
 - [x] Oracle 查無資料、多筆對應及 API 失敗時顯示明確狀態
 - [x] 顯示資料來源

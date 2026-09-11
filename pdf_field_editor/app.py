@@ -76,7 +76,7 @@ st.markdown(
 
 def render_invoice_data(file_bytes: bytes, is_pdf: bool) -> None:
     st.subheader("發票內容")
-    st.caption("Invoice No、Customer PN 與每一筆 Item 顯示在同一列，並標示資料來源。")
+    st.caption("Invoice No、Vendor Item 與每一筆 ECS Item 顯示在同一列，並標示資料來源。")
 
     try:
         with st.status("正在分析文件結構…", expanded=True) as status:
@@ -158,7 +158,7 @@ def render_invoice_data(file_bytes: bytes, is_pdf: bool) -> None:
                 except SqlApiError as exc:
                     updated[customer_item] = EcsItemLookup("查詢失敗", "查詢失敗", "error")
                     logger.warning("ECS lookup failed item=%r error=%s", customer_item, exc)
-                    st.warning(f"Cust Item {customer_item}：{exc}")
+                    st.warning(f"Vendor Item {customer_item}：{exc}")
                 progress.progress(index / len(missing_items), text=f"查詢進度 {index}/{len(missing_items)}：{customer_item}")
             progress.empty()
             ecs_lookups = updated
@@ -167,44 +167,43 @@ def render_invoice_data(file_bytes: bytes, is_pdf: bool) -> None:
     else:
         description_cache_key = f"sql_descriptions_{hashlib.sha256(file_bytes).hexdigest()}"
         descriptions = st.session_state.get(description_cache_key, {})
-        if st.button("查詢 Description", type="primary", key="query_word_descriptions"):
-            item_values = list(dict.fromkeys(row.customer_pn for row in rows))
-            progress = st.progress(0, text="正在查詢 Description...")
+        item_values = list(dict.fromkeys(row.customer_pn for row in rows if row.customer_pn))
+        missing_items = [item for item in item_values if item not in descriptions]
+        if missing_items:
+            progress = st.progress(0, text=f"正在查詢 Description 0/{len(missing_items)}")
             updated = dict(descriptions)
-            for index, item_value in enumerate(item_values, start=1):
-                if item_value not in updated:
-                    try:
-                        updated[item_value] = query_description(item_value)
-                    except SqlApiError as exc:
-                        updated[item_value] = "查詢失敗"
-                        logger.warning("Description lookup failed item=%r error=%s", item_value, exc)
-                        st.warning(f"Item {item_value}：{exc}")
-                progress.progress(index / len(item_values), text=f"正在查詢 {item_value}")
+            for index, item_value in enumerate(missing_items, start=1):
+                try:
+                    updated[item_value] = query_description(item_value)
+                except SqlApiError as exc:
+                    updated[item_value] = "查詢失敗"
+                    logger.warning("Description lookup failed item=%r error=%s", item_value, exc)
+                    st.warning(f"Item {item_value}：{exc}")
+                progress.progress(index / len(missing_items), text=f"正在查詢 Description {index}/{len(missing_items)}：{item_value}")
             progress.empty()
             descriptions = updated
             st.session_state[description_cache_key] = descriptions
-            st.success("Description 查詢完成。")
+            st.success("ECS Description 已自動查詢完成。")
 
     display_rows = [row.as_display_dict() for row in rows]
     for row, display_row in zip(rows, display_rows):
         if is_pdf:
             display_row.pop("Customer PN", None)
             lookup = ecs_lookups.get(row.item)
-            display_row["Cust Item"] = display_row.pop("Item")
-            display_row["Cust Description"] = display_row.pop("Description")
+            display_row["Vendor Item"] = display_row.pop("Item")
+            display_row["Vendor Description"] = display_row.pop("Description")
             display_row["ECS Item"] = lookup.ecs_item if lookup else "尚未查詢"
             display_row["ECS Description"] = lookup.ecs_description if lookup else "尚未查詢"
         else:
-            display_row["Description"] = descriptions.get(row.customer_pn, "尚未查詢")
-            display_row["Item"], display_row["Customer PN"] = (
-                display_row["Customer PN"],
-                display_row["Item"],
-            )
+            display_row["ECS Description"] = descriptions.get(row.customer_pn, "尚未查詢")
+            display_row["ECS Item"] = display_row.pop("Customer PN")
+            display_row["Vendor Item"] = display_row.pop("Item")
+            display_row.pop("Description", None)
 
     column_order = (
-        ["Invoice No", "Cust Item", "Cust Description", "ECS Item", "ECS Description", "Quantity", "Unit Price", "來源"]
+        ["Invoice No", "Vendor Item", "Vendor Description", "ECS Item", "ECS Description", "Quantity", "Unit Price", "來源"]
         if is_pdf
-        else ["Invoice No", "Item", "Customer PN", "Description", "Quantity", "Unit Price", "來源"]
+        else ["Invoice No", "Vendor Item", "ECS Item", "ECS Description", "Quantity", "Unit Price", "來源"]
     )
 
     st.dataframe(
@@ -217,8 +216,8 @@ def render_invoice_data(file_bytes: bytes, is_pdf: bool) -> None:
             "Item": st.column_config.TextColumn("Item", width="medium"),
             "Customer PN": st.column_config.TextColumn("Customer PN", width="medium"),
             "Description": st.column_config.TextColumn("Description", width="large"),
-            "Cust Item": st.column_config.TextColumn("Cust Item", width="medium"),
-            "Cust Description": st.column_config.TextColumn("Cust Description", width="large"),
+            "Vendor Item": st.column_config.TextColumn("Vendor Item", width="medium"),
+            "Vendor Description": st.column_config.TextColumn("Vendor Description", width="large"),
             "ECS Item": st.column_config.TextColumn("ECS Item", width="medium"),
             "ECS Description": st.column_config.TextColumn("ECS Description", width="large"),
             "Quantity": st.column_config.TextColumn("Quantity", width="small"),
@@ -425,11 +424,6 @@ log_event("file uploaded", name=uploaded.name, size=len(file_bytes), kind="pdf" 
 if not file_bytes:
     st.error("上傳的檔案是空白檔案，請重新選擇。")
     st.stop()
-
-meta1, meta2, meta3 = st.columns(3)
-meta1.metric("檔案格式", "PDF" if is_pdf else "Word")
-meta2.metric("檔案大小", f"{len(file_bytes) / 1024:,.1f} KB")
-meta3.metric("目前階段", "已就緒")
 
 if is_pdf:
     data_tab, edit_tab = st.tabs(["發票內容擷取", "PDF 欄位修改"])

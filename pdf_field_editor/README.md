@@ -4,7 +4,7 @@
 
 平台也會擷取並顯示發票的 `Invoice No`、`Item`、`Description`、`Quantity` 與 `Unit Price`。若來源 PDF 的價格已被實際遮蓋，價格會顯示為「無法辨識」，不會利用其他欄位反推。
 
-PDF 上傳後，原始 Item 與 Description 會顯示為 `Cust Item` 與 `Cust Description`。平台會自動將不重複的 Cust Item 傳入內部 Oracle SQL API，並顯示對應的 `ECS Item` 與 `ECS Description`，不需要另外按查詢按鈕。
+PDF 上傳後，原始 Item 與 Description 會顯示為 `Vendor Item` 與 `Vendor Description`。平台會自動將不重複的 Vendor Item 傳入內部 Oracle SQL API，並顯示對應的 `ECS Item` 與 `ECS Description`，不需要另外按查詢按鈕。
 
 同一份 PDF 含有多張 Invoice 時，每一頁會重新辨識 Invoice No；若續頁沒有重複顯示號碼，才會沿用上一頁的 Invoice No。
 

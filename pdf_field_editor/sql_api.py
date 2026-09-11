@@ -92,7 +92,7 @@ def query_description(segment1: str, timeout: float = 30.0) -> str:
 def query_ecs_item(customer_item_no: str, timeout: float = 30.0) -> EcsItemLookup:
     customer_item_no = customer_item_no.strip()
     if not ITEM_PATTERN.fullmatch(customer_item_no):
-        raise SqlApiError(f"Cust Item 格式不合法：{customer_item_no}")
+        raise SqlApiError(f"Vendor Item 格式不合法：{customer_item_no}")
 
     sql = (
         "SELECT item_no "

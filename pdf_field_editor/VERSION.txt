@@ -6,5 +6,5 @@
 - PDF／Word 發票內容擷取
 - PDF／Word 欄位修改
 - 影像型文件 OCR
-- PDF Cust Item 自動查詢 ECS Item／ECS Description
+- PDF Vendor Item 自動查詢 ECS Item／ECS Description
 - 一鍵建立虛擬環境、安裝套件並啟動平台

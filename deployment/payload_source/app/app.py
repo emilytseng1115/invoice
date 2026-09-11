@@ -36,7 +36,7 @@ st.markdown(
 
 def render_invoice_data(file_bytes: bytes, is_pdf: bool) -> None:
     st.subheader("發票內容")
-    st.caption("Invoice No、Customer PN 與每一筆 Item 顯示在同一列，並標示資料來源。")
+    st.caption("Invoice No、Vendor Item 與每一筆 ECS Item 顯示在同一列，並標示資料來源。")
 
     ocr_config = load_ocr_config()
     image_pages = detect_image_pages(file_bytes) if is_pdf else []
@@ -99,38 +99,37 @@ def render_invoice_data(file_bytes: bytes, is_pdf: bool) -> None:
     if not is_pdf:
         description_cache_key = f"sql_descriptions_{hashlib.sha256(file_bytes).hexdigest()}"
         descriptions = st.session_state.get(description_cache_key, {})
-        if st.button("查詢 Description", type="primary", key="query_word_descriptions"):
-            item_values = list(dict.fromkeys(row.customer_pn for row in rows))
-            progress = st.progress(0, text="正在查詢 Description...")
+        item_values = list(dict.fromkeys(row.customer_pn for row in rows if row.customer_pn))
+        missing_items = [item for item in item_values if item not in descriptions]
+        if missing_items:
+            progress = st.progress(0, text=f"正在查詢 Description 0/{len(missing_items)}")
             updated = dict(descriptions)
-            for index, item_value in enumerate(item_values, start=1):
-                if item_value not in updated:
-                    try:
-                        updated[item_value] = query_description(item_value)
-                    except SqlApiError as exc:
-                        updated[item_value] = "查詢失敗"
-                        st.warning(f"Item {item_value}：{exc}")
-                progress.progress(index / len(item_values), text=f"正在查詢 {item_value}")
+            for index, item_value in enumerate(missing_items, start=1):
+                try:
+                    updated[item_value] = query_description(item_value)
+                except SqlApiError as exc:
+                    updated[item_value] = "查詢失敗"
+                    st.warning(f"Item {item_value}：{exc}")
+                progress.progress(index / len(missing_items), text=f"正在查詢 Description {index}/{len(missing_items)}：{item_value}")
             progress.empty()
             descriptions = updated
             st.session_state[description_cache_key] = descriptions
-            st.success("Description 查詢完成。")
+            st.success("ECS Description 已自動查詢完成。")
 
     display_rows = [row.as_display_dict() for row in rows]
     for row, display_row in zip(rows, display_rows):
         if is_pdf:
             display_row.pop("Customer PN", None)
         else:
-            display_row["Description"] = descriptions.get(row.customer_pn, "尚未查詢")
-            display_row["Item"], display_row["Customer PN"] = (
-                display_row["Customer PN"],
-                display_row["Item"],
-            )
+            display_row["ECS Description"] = descriptions.get(row.customer_pn, "尚未查詢")
+            display_row["ECS Item"] = display_row.pop("Customer PN")
+            display_row["Vendor Item"] = display_row.pop("Item")
+            display_row.pop("Description", None)
 
     column_order = (
         ["Invoice No", "Item", "Description", "Quantity", "Unit Price", "來源"]
         if is_pdf
-        else ["Invoice No", "Item", "Customer PN", "Description", "Quantity", "Unit Price", "來源"]
+        else ["Invoice No", "Vendor Item", "ECS Item", "ECS Description", "Quantity", "Unit Price", "來源"]
     )
 
     st.dataframe(
@@ -143,6 +142,9 @@ def render_invoice_data(file_bytes: bytes, is_pdf: bool) -> None:
             "Item": st.column_config.TextColumn("Item", width="medium"),
             "Customer PN": st.column_config.TextColumn("Customer PN", width="medium"),
             "Description": st.column_config.TextColumn("Description", width="large"),
+            "ECS Description": st.column_config.TextColumn("ECS Description", width="large"),
+            "ECS Item": st.column_config.TextColumn("ECS Item", width="medium"),
+            "Vendor Item": st.column_config.TextColumn("Vendor Item", width="medium"),
             "Quantity": st.column_config.TextColumn("Quantity", width="small"),
             "Unit Price": st.column_config.TextColumn("Unit Price", width="small"),
             "來源": st.column_config.TextColumn("來源", width="small"),
